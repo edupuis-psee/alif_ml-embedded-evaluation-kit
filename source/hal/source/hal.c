@@ -34,7 +34,7 @@ bool hal_platform_init(void)
     }
 
     /* Initialise PMU */
-    hal_pmu_init();
+    //hal_pmu_init();
 
     return true;
 }

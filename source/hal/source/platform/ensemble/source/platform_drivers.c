@@ -63,6 +63,8 @@
 
 uint32_t tprof1, tprof2, tprof3, tprof4, tprof5;
 
+extern uint32_t services_handle;
+
 /** Platform name */
 static const char* s_platform_name = DESIGN_NAME;
 
@@ -94,6 +96,49 @@ static void copy_vtor_table_to_ram()
 }
 #endif
 
+static uint32_t set_power_profiles()
+{
+    run_profile_t default_runprof;
+    off_profile_t default_offprof;
+    uint32_t service_error_code;
+    uint32_t err;
+
+    default_runprof.power_domains   = PD_VBAT_AON_MASK | PD_SSE700_AON_MASK | PD_SYST_MASK | PD_SESS_MASK;
+    default_runprof.dcdc_mode       = DCDC_MODE_PWM;
+    default_runprof.dcdc_voltage    = DCDC_VOUT_0825;
+    default_runprof.aon_clk_src     = CLK_SRC_LFXO;
+    default_runprof.run_clk_src     = CLK_SRC_PLL;
+    default_runprof.cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
+    default_runprof.scaled_clk_freq = SCALED_FREQ_XO_HIGH_DIV_38_4_MHZ;
+    default_runprof.memory_blocks   = SERAM_MASK | SRAM0_MASK | SRAM1_MASK | MRAM_MASK | FWRAM_MASK;
+    default_runprof.ip_clock_gating = NPU_HE_MASK | LP_PERIPH_MASK;
+    default_runprof.phy_pwr_gating  = 0;
+    default_runprof.vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
+    err = SERVICES_set_run_cfg(services_handle, &default_runprof, &service_error_code);
+
+    if ((err + service_error_code) == 0) {
+        // No power domains on off profile -> device can go to chip STOP mode which is the most least power consumption state
+        default_offprof.power_domains   = 0;
+        default_offprof.dcdc_voltage    = DCDC_VOUT_0825;
+        default_offprof.dcdc_mode       = DCDC_MODE_PWM;
+        default_offprof.aon_clk_src     = CLK_SRC_LFXO;
+        default_offprof.stby_clk_src    = CLK_SRC_HFRC;
+        default_offprof.stby_clk_freq   = SCALED_FREQ_RC_STDBY_38_4_MHZ;
+        // default_offprof.sysref_clk_src = /* SoC Reference Clock shared with all subsystems */
+        default_offprof.memory_blocks   = SERAM_MASK | MRAM_MASK;
+        default_offprof.ip_clock_gating = 0;
+        default_offprof.phy_pwr_gating  = 0;
+        default_offprof.vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
+        default_offprof.wakeup_events   = WE_LPGPIO;
+        default_offprof.ewic_cfg        = EWIC_VBAT_GPIO;
+        default_offprof.vtor_address    = 0x80008000;
+        default_offprof.vtor_address_ns = 0x80008000;
+        err = SERVICES_set_off_cfg(services_handle, &default_offprof, &service_error_code);
+    }
+
+    return err + service_error_code;
+}
+
 int platform_init(void)
 {
     /* Turn off PRIVDEFENA - only way to have address 0 unmapped */
@@ -112,9 +157,6 @@ int platform_init(void)
     extern void _clock_init(void);
     _clock_init();
 #endif
-
-    tracelib_init(NULL);
-    fault_dump_enable(true);
 
     extern ARM_DRIVER_HWSEM ARM_Driver_HWSEM_(0);
     ARM_DRIVER_HWSEM *HWSEMdrv = &ARM_Driver_HWSEM_(0);
@@ -150,6 +192,19 @@ int platform_init(void)
     }
 
     HWSEMdrv->Uninitialize();
+
+    init_trigger_tx();
+    SERVICES_synchronize_with_se(services_handle);
+
+    uint32_t service_error_code;
+
+    SERVICES_system_set_services_debug(services_handle, false, &service_error_code);
+
+    set_power_profiles();
+
+    // init tracelib after power profiles are set
+    tracelib_init(NULL);
+    fault_dump_enable(true);
 
     info("Processor internal clock: %" PRIu32 "Hz\n", GetSystemCoreClock());
     info("%s: complete\n", __FUNCTION__);

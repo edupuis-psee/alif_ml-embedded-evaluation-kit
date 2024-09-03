@@ -126,6 +126,12 @@ void ethosu_pmu_init(void)
     ethosu_pmu_reset_counters();
 }
 
+void ethosu_pmu_final(void)
+{
+    /* Disable PMU. */
+    ETHOSU_PMU_Disable(&ethosu_drv);
+}
+
 /**
  * @brief  Resets the Arm Ethos-U NPU PMU counters.
  */
