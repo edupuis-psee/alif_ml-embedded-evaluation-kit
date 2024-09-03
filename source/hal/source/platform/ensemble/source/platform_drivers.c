@@ -108,13 +108,40 @@ static uint32_t set_power_profiles()
     default_runprof.dcdc_voltage    = DCDC_VOUT_0825;
     default_runprof.aon_clk_src     = CLK_SRC_LFXO;
     default_runprof.run_clk_src     = CLK_SRC_PLL;
-    default_runprof.cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
     default_runprof.scaled_clk_freq = SCALED_FREQ_XO_HIGH_DIV_38_4_MHZ;
     default_runprof.memory_blocks   = SERAM_MASK | SRAM0_MASK | SRAM1_MASK | MRAM_MASK | FWRAM_MASK;
-    default_runprof.ip_clock_gating = NPU_HE_MASK | LP_PERIPH_MASK;
     default_runprof.phy_pwr_gating  = 0;
+#ifdef M55_HE
+    default_runprof.cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
+    default_runprof.ip_clock_gating = NPU_HE_MASK;
+#elif M55_HP
+    default_runprof.cpu_clk_freq    = CLOCK_FREQUENCY_400MHZ;
+    default_runprof.ip_clock_gating = NPU_HP_MASK;
+#endif
+#ifdef ALIF_OBJECT_DETECTION_POWER
+    default_runprof.ip_clock_gating |= CAMERA_MASK | MIPI_DSI_MASK | MIPI_CSI_MASK;
+    default_runprof.phy_pwr_gating  |= LDO_PHY_MASK | MIPI_TX_DPHY_MASK | MIPI_RX_DPHY_MASK | MIPI_PLL_DPHY_MASK;
+#endif
     default_runprof.vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
     err = SERVICES_set_run_cfg(services_handle, &default_runprof, &service_error_code);
+
+ #ifdef ALIF_OBJECT_DETECTION_POWER
+     if (err == 0) {
+        // Enable peripheral clocks, dphy_tx_clk
+        err = SERVICES_clocks_enable_clock(services_handle,
+                                        CLKEN_HFOSC,
+                                        true,
+                                        &service_error_code);
+    }
+
+    if (err == 0) {
+        // CSI, DSI...
+        err = SERVICES_clocks_enable_clock(services_handle,
+                                        CLKEN_CLK_100M,
+                                        true,
+                                        &service_error_code);
+    }
+#endif
 
     if ((err + service_error_code) == 0) {
         // No power domains on off profile -> device can go to chip STOP mode which is the most least power consumption state
@@ -125,18 +152,25 @@ static uint32_t set_power_profiles()
         default_offprof.stby_clk_src    = CLK_SRC_HFRC;
         default_offprof.stby_clk_freq   = SCALED_FREQ_RC_STDBY_38_4_MHZ;
         // default_offprof.sysref_clk_src = /* SoC Reference Clock shared with all subsystems */
-        default_offprof.memory_blocks   = SERAM_MASK | MRAM_MASK;
+        default_offprof.memory_blocks   = SERAM_MASK;
         default_offprof.ip_clock_gating = 0;
         default_offprof.phy_pwr_gating  = 0;
         default_offprof.vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
         default_offprof.wakeup_events   = WE_LPGPIO;
         default_offprof.ewic_cfg        = EWIC_VBAT_GPIO;
+#ifdef M55_HE
+        default_offprof.vtor_address    = 0x80480000;
+        default_offprof.vtor_address_ns = 0x80480000;
+#elif M55_HP
         default_offprof.vtor_address    = 0x80008000;
         default_offprof.vtor_address_ns = 0x80008000;
+#else
+#error "Only M55_HE or M55_HP core is supported!"
+#endif
         err = SERVICES_set_off_cfg(services_handle, &default_offprof, &service_error_code);
     }
 
-    return err + service_error_code;
+    return (err + service_error_code);
 }
 
 int platform_init(void)
@@ -200,7 +234,7 @@ int platform_init(void)
 
     SERVICES_system_set_services_debug(services_handle, false, &service_error_code);
 
-    set_power_profiles();
+    err = (int)set_power_profiles();
 
     // init tracelib after power profiles are set
     tracelib_init(NULL);
@@ -208,6 +242,11 @@ int platform_init(void)
 
     info("Processor internal clock: %" PRIu32 "Hz\n", GetSystemCoreClock());
     info("%s: complete\n", __FUNCTION__);
+
+    if (err) {
+        printf_err("Failed to set power profiles!\n");
+        return -1;
+    }
 
 #if defined(ARM_NPU)
 
