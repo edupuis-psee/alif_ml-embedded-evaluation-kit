@@ -95,7 +95,8 @@ add_library(${PLATFORM_DRIVERS_TARGET} STATIC)
 ## Include directories - private
 target_include_directories(${PLATFORM_DRIVERS_TARGET}
     PRIVATE
-    source)
+    source
+    ${CMAKE_SOURCE_DIR}/source/hal/source/platform/simple/include)
 
 ## Include directories - public
 target_include_directories(${PLATFORM_DRIVERS_TARGET}
